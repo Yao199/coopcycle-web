@@ -78,7 +78,7 @@ class StripeManager
     /**
      * @return Stripe\PaymentIntent
      */
-    public function createIntent(StripePayment $stripePayment): Stripe\PaymentIntent
+    public function createIntent(StripePayment $stripePayment, bool $automaticCapture = true): Stripe\PaymentIntent
     {
         Stripe\Stripe::setApiKey($this->settingsManager->get('stripe_secret_key'));
 
@@ -92,9 +92,13 @@ class StripeManager
             'confirmation_method' => 'manual',
             'confirm' => true,
             // 'statement_descriptor' => '...',
-            // @see https://stripe.com/docs/payments/payment-intents/use-cases#separate-auth-capture
-            'capture_method' => 'manual'
         ];
+
+        if (!$automaticCapture) {
+            // @see https://stripe.com/docs/payments/payment-intents/use-cases#separate-auth-capture
+            // @see https://stripe.com/docs/payments/payment-intents/creating-payment-intents#separate-authorization-and-capture
+            $payload['capture_method'] = 'manual';
+        }
 
         $this->configurePayment($stripePayment);
 

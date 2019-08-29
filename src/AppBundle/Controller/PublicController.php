@@ -2,44 +2,55 @@
 
 namespace AppBundle\Controller;
 
+use AppBundle\Controller\Utils\StripeTrait;
 use AppBundle\Entity\Delivery;
 use AppBundle\Entity\StripePayment;
 use AppBundle\Form\StripePaymentType;
+use AppBundle\Service\OrderManager;
 use AppBundle\Service\SettingsManager;
+use AppBundle\Service\StripeManager;
+use Doctrine\Common\Persistence\ObjectManager;
 use Hashids\Hashids;
 use Lexik\Bundle\JWTAuthenticationBundle\Encoder\JWTEncoderInterface;
 use Lexik\Bundle\JWTAuthenticationBundle\Services\JWSProvider\JWSProviderInterface;
-use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Psr\Log\LoggerInterface;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Template;
-use Stripe;
+use SM\Factory\FactoryInterface as StateMachineFactoryInterface;
+use Sylius\Component\Order\Repository\OrderRepositoryInterface;
 use Sylius\Component\Payment\PaymentTransitions;
+use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Annotation\Route;
+use Stripe;
 
 /**
  * @Route("/{_locale}/pub", requirements={ "_locale": "%locale_regex%" })
  */
 class PublicController extends AbstractController
 {
+    use StripeTrait;
+
     public function __construct(
-        $stateMachineFactory,
-        $orderRepository)
+        StateMachineFactoryInterface $stateMachineFactory,
+        OrderRepositoryInterface $orderRepository,
+        LoggerInterface $logger)
     {
         $this->stateMachineFactory = $stateMachineFactory;
         $this->orderRepository = $orderRepository;
+        $this->logger = $logger;
     }
 
     /**
      * @Route("/o/{number}", name="public_order")
      * @Template
      */
-    public function orderAction($number, Request $request, SettingsManager $settingsManager)
+    public function orderAction($number, Request $request,
+        SettingsManager $settingsManager,
+        StripeManager $stripeManager)
     {
-        Stripe\Stripe::setApiKey($settingsManager->get('stripe_secret_key'));
-
         $order = $this->orderRepository->findOneBy([
             'number' => $number
         ]);
@@ -58,6 +69,10 @@ class PublicController extends AbstractController
 
         if ($stateMachine->can(PaymentTransitions::TRANSITION_COMPLETE)) {
 
+            // Make sure to call StripeManager::configurePayment()
+            // It will resolve the Stripe account that will be used
+            $stripeManager->configurePayment($stripePayment);
+
             $form = $this->createForm(StripePaymentType::class, $stripePayment);
 
             $form->handleRequest($request);
@@ -65,21 +80,37 @@ class PublicController extends AbstractController
             // TODO : handle this with orderManager
             if ($form->isSubmitted() && $form->isValid()) {
 
+                $stripeToken = $form->get('stripeToken')->getData();
+
                 try {
 
-                    $stripeToken = $form->get('stripeToken')->getData();
+                    if ($stripePayment->getPaymentIntent()) {
 
-                    $charge = Stripe\Charge::create([
-                      'amount' => $stripePayment->getAmount(),
-                      'currency' => strtolower($stripePayment->getCurrencyCode()),
-                      'description' => sprintf('Order %s', $order->getNumber()),
-                      'metadata' => [
-                        'order_id' => $order->getId()
-                      ],
-                      'source' => $stripeToken,
-                    ]);
+                        if ($stripePayment->getPaymentIntent() !== $stripeToken) {
+                            throw new \Exception('Payment Intent mismatch');
+                        }
 
-                    $stripePayment->setCharge($charge->id);
+                        if ($stripePayment->requiresUseStripeSDK()) {
+                            $stripeManager->confirmIntent($stripePayment);
+                        }
+
+                    } else {
+
+                        // Legacy
+                        Stripe\Stripe::setApiKey($settingsManager->get('stripe_secret_key'));
+                        $charge = Stripe\Charge::create([
+                            'amount' => $stripePayment->getAmount(),
+                            'currency' => strtolower($stripePayment->getCurrencyCode()),
+                            'description' => sprintf('Order %s', $order->getNumber()),
+                            'metadata' => [
+                                'order_id' => $order->getId()
+                            ],
+                            'source' => $stripeToken,
+                        ]);
+                        $stripePayment->setCharge($charge->id);
+
+                    }
+
                     $stateMachine->apply(PaymentTransitions::TRANSITION_COMPLETE);
 
                 } catch (\Exception $e) {
@@ -98,6 +129,31 @@ class PublicController extends AbstractController
         }
 
         return $parameters;
+    }
+
+    /**
+     * @Route("/o/{number}/confirm-payment", name="public_order_confirm_payment", methods={"POST"})
+     */
+    public function confirmPaymentAction($number, Request $request,
+        OrderManager $orderManager,
+        ObjectManager $objectManager)
+    {
+        $order = $this->orderRepository->findOneBy([
+            'number' => $number
+        ]);
+
+        if (null === $order) {
+            throw new NotFoundHttpException(sprintf('Order %s does not exist', $number));
+        }
+
+        return $this->confirmPayment(
+            $request,
+            $order,
+            true,
+            $orderManager,
+            $objectManager,
+            $this->logger
+        );
     }
 
     /**

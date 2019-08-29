@@ -31,7 +31,7 @@ class CreatePaymentIntentHandler
         $order = $command->getOrder();
         $paymentMethodId = $command->getPaymentMethodId();
 
-        $stripePayment = $order->getLastPayment(PaymentInterface::STATE_CART);
+        $stripePayment = $order->getLastPayment(/* PaymentInterface::STATE_CART */);
         $stripePayment->setPaymentMethod($paymentMethodId);
 
         // TODO Check if $stripePayment !== null

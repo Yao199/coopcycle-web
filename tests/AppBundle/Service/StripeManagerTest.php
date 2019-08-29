@@ -322,7 +322,7 @@ class StripeManagerTest extends TestCase
             "application_fee_amount" => 750
         ]);
 
-        $this->stripeManager->createIntent($stripePayment);
+        $this->stripeManager->createIntent($stripePayment, false);
     }
 
     public function testConfirmIntent()

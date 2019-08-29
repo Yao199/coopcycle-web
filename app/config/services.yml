@@ -153,11 +153,15 @@ services:
     arguments:
       $objectManager: '@sylius.manager.order'
       $commandBus: '@command_bus'
+    tags:
+      - { name: monolog.logger, channel: stripe }
 
   AppBundle\Controller\PublicController:
     arguments:
       $stateMachineFactory: '@sm.factory'
       $orderRepository: '@sylius.repository.order'
+    tags:
+      - { name: monolog.logger, channel: stripe }
 
   AppBundle\Controller\RestaurantController:
     arguments:

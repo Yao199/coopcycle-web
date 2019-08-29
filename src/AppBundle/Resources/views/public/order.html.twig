@@ -115,7 +115,9 @@ new CoopCycle.DeliveryMap('map', {
 new CoopCycle.StripePaymentForm(document.querySelector('form[name="stripe_payment"]'), {
   publishableKey: "{{ coopcycle_setting('stripe_publishable_key') }}",
   tokenElement: document.querySelector('#stripe_payment_stripeToken'),
-  cardholderNameElement: document.querySelector('#stripe_payment_cardholderName')
+  cardholderNameElement: document.querySelector('#stripe_payment_cardholderName'),
+  account: {% if stripe_payment.stripeUserId %}"{{ stripe_payment.stripeUserId }}"{% else %}null{% endif %},
+  confirmPaymentRoute: "{{ path('public_order_confirm_payment', { number: order.number }) }}"
 })
 {% endif %}
 </script>

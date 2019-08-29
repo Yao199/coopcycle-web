@@ -42,7 +42,7 @@ class CreatePaymentIntentHandlerTest extends TestCase
         $stripePayment = new StripePayment();
 
         $order
-            ->getLastPayment(PaymentInterface::STATE_CART)
+            ->getLastPayment(/* PaymentInterface::STATE_CART */)
             ->willReturn($stripePayment);
 
         $this->orderNumberAssigner
@@ -62,7 +62,7 @@ class CreatePaymentIntentHandlerTest extends TestCase
             ->createIntent($stripePayment)
             ->willReturn($paymentIntent);
 
-        $command = new CreatePaymentIntent($order->reveal(), 'pm_123456');
+        $command = new CreatePaymentIntent($order->reveal(), 'pm_123456', false);
 
         call_user_func_array($this->handler, [$command]);
 
